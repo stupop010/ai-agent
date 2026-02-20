@@ -53,7 +53,12 @@ LIMITATIONS = """# My Limitations & Memory System
 
 ## Identity Memory (Letta)
 - Use `read_memory` / `update_memory` only for core identity blocks (persona, human).
-- Do NOT use Letta memory for working data — use state files instead."""
+- Do NOT use Letta memory for working data — use state files instead.
+
+## Scheduling
+- Use `schedule_job` to create one-shot reminders (with `run_at`) or recurring check-ins (with `hour`, `minute`, `day_of_week`).
+- Use `list_jobs` to see all agent-created jobs.
+- Use `cancel_job` to remove a scheduled job by ID."""
 
 
 def get_client() -> Letta:

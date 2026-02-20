@@ -7,6 +7,8 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+import agent_jobs
+import bot_context
 import db
 import logs
 from scheduler import build_scheduler
@@ -39,9 +41,12 @@ class AccountabilityBot(commands.Bot):
             logger.info(f"Loaded cog: {cog}")
         await self.tree.sync()
         logger.info("Slash commands synced")
+        bot_context.set_bot(self)
         self.scheduler = build_scheduler(self)
         self.scheduler.start()
         logger.info("Scheduler started")
+        agent_jobs.reload_jobs(self.scheduler)
+        logger.info("Agent jobs reloaded")
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
