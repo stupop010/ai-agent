@@ -1,4 +1,4 @@
-# v1.0.1 - PR workflow test
+# v1.0.2 - PR workflow test
 import asyncio
 import logging
 import os
