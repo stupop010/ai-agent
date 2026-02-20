@@ -7,7 +7,11 @@
       "Bash(ssh root@46.225.190.185 \"curl -s http://localhost:8283/v1/health/\")",
       "Bash(ssh root@46.225.190.185:*)",
       "Bash(gh auth status:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(ssh:*)",
+      "Bash(wc:*)",
+      "Bash(py -3 -c:*)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\(''C:/Users/stupo/OneDrive/ai-agent/bot/claude_client.py''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")"
     ]
   }
 }

@@ -63,7 +63,7 @@ def write_event(
     logger.debug("Event logged: [%s] %s", event_type, message[:50])
 
 
-def read_recent_journal(n: int = 40) -> list[JournalEntry]:
+def read_recent_journal(n: int = 15) -> list[JournalEntry]:
     """Read the last n journal entries for prompt injection."""
     path = LOGS_DIR / "journal.jsonl"
     if not path.exists():
@@ -100,7 +100,7 @@ def query_journal_by_topic(topic: str) -> list[JournalEntry]:
 def format_journal_for_prompt(entries: list[JournalEntry] | None = None) -> str:
     """Format journal entries for injection into agent prompt."""
     if entries is None:
-        entries = read_recent_journal(n=40)
+        entries = read_recent_journal(n=15)
     if not entries:
         return ""
     lines = ["## Recent Activity Log:"]

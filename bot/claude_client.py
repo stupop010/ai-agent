@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import os
+from datetime import datetime, timezone
 
 import anthropic
 
@@ -15,6 +16,7 @@ import letta_agent
 import logs
 import memory_tools
 import self_modify
+import state
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,57 @@ TOOLS = [
         },
     },
     {
+        "name": "read_state",
+        "description": (
+            "Read a working-memory state file from bot/state/. "
+            "Use this to check commitments, projects, patterns, current_focus, "
+            "or any other .md file you've previously written."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Name of the .md file to read (e.g. 'commitments.md')",
+                },
+            },
+            "required": ["filename"],
+        },
+    },
+    {
+        "name": "write_state",
+        "description": (
+            "Write to a working-memory state file in bot/state/. "
+            "Use this to persist commitments, projects, patterns, current_focus, "
+            "or any working memory you want to recall later."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Name of the .md file to write (e.g. 'commitments.md')",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The full content to write to the file",
+                },
+            },
+            "required": ["filename", "content"],
+        },
+    },
+    {
+        "name": "list_state",
+        "description": (
+            "List all working-memory state files in bot/state/ with previews. "
+            "Use this to see what state files exist before reading one."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
         "type": "web_search_20250305",
         "name": "web_search",
         "max_uses": 3,
@@ -171,30 +224,21 @@ def get_client() -> anthropic.Anthropic:
 
 def _build_system_prompt() -> str:
     """
-    Assemble the system prompt from persona, human context, live Letta
-    memory blocks, recent journal entries, and limitations.
+    Assemble the system prompt from persona, human context,
+    recent journal entries, and limitations.
 
-    Rebuilt every call so Claude always sees fresh memory state.
+    Working memory is NOT injected here — the agent reads state files
+    on demand via read_state / list_state tools.
     """
-    client = letta_agent.get_client()
-    agent_id = letta_agent.get_agent_id()
-
-    # Fetch all current memory blocks from Letta
-    blocks = memory_tools.list_memories(client, agent_id)
-    if blocks:
-        memory_section = "# Current Memory Blocks\n\n"
-        for b in blocks:
-            memory_section += f"## [{b['label']}]\n{b['value']}\n\n"
-    else:
-        memory_section = "# Current Memory Blocks\n\n(no blocks loaded)\n\n"
-
     # Recent journal entries for temporal context
     journal_section = logs.format_journal_for_prompt()
 
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
     return (
+        f"Current time: {now}\n\n"
         f"{letta_agent.PERSONA}\n\n"
         f"# About Stuart\n{letta_agent.HUMAN}\n\n"
-        f"{memory_section}"
         f"{journal_section}"
         f"{letta_agent.LIMITATIONS}\n"
     )
@@ -226,6 +270,31 @@ def _execute_tool(name: str, args: dict) -> str:
         if ok:
             return json.dumps({"success": True, "label": args["label"]})
         return json.dumps({"error": f"Failed to create block '{args['label']}'"})
+
+    elif name == "read_state":
+        filename = args["filename"]
+        if not filename.endswith(".md") or "/" in filename or "\\" in filename:
+            return json.dumps({"error": "Filename must be a .md file with no path separators"})
+        content = state.read(filename)
+        if not content:
+            return json.dumps({"error": f"State file '{filename}' not found or empty"})
+        return json.dumps({"filename": filename, "content": content})
+
+    elif name == "write_state":
+        filename = args["filename"]
+        if not filename.endswith(".md") or "/" in filename or "\\" in filename:
+            return json.dumps({"error": "Filename must be a .md file with no path separators"})
+        state.write(filename, args["content"])
+        return json.dumps({"success": True, "filename": filename})
+
+    elif name == "list_state":
+        state._ensure_dir()
+        files = []
+        for path in sorted(state.STATE_DIR.glob("*.md")):
+            content = path.read_text(encoding="utf-8").strip()
+            preview = content[:120] + "..." if len(content) > 120 else content
+            files.append({"filename": path.name, "preview": preview})
+        return json.dumps({"files": files})
 
     elif name == "read_file":
         file_path = args["file_path"]

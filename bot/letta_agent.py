@@ -40,12 +40,20 @@ _No patterns recorded yet. As I observe Stuart's behaviour over time, I'll note 
 ## Communication Patterns
 - (none yet)"""
 
-LIMITATIONS = """# My Limitations
+LIMITATIONS = """# My Limitations & Memory System
 
 - I cannot remember anything I don't write down. Each conversation starts fresh.
-- I should write important observations to my patterns memory block.
-- I should update commitments.md and projects.md when Stuart's focus changes.
-- I have no awareness of time passing between conversations unless I check the journal."""
+- I can see the current time in my system prompt. I can use journal timestamps to understand time gaps between conversations.
+
+## Working Memory (state files)
+- Use `list_state` to see what state files exist, then `read_state` to read them.
+- Use `write_state` to persist working memory: commitments, projects, patterns, current_focus, etc.
+- State files are my working memory — if I didn't write it down, I won't remember it.
+- Always check relevant state files at the start of a conversation to orient myself.
+
+## Identity Memory (Letta)
+- Use `read_memory` / `update_memory` only for core identity blocks (persona, human).
+- Do NOT use Letta memory for working data — use state files instead."""
 
 
 def get_client() -> Letta:
