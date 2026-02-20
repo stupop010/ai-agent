@@ -2,13 +2,14 @@
 Unified agent interface with logging and state sync.
 
 This module provides the primary interface for all agent interactions.
-Letta handles memory and context natively. After each interaction we:
+Claude handles reasoning via direct Anthropic API calls. Letta is used
+as a persistent memory store. After each interaction we:
 - Log to the journal (temporal awareness layer)
 - Sync Letta memory blocks to state files (readable on disk)
 """
 import logging
 
-import letta_agent
+import claude_client
 import logs
 import state
 
@@ -22,12 +23,12 @@ def ask(
     user_stated: str | None = None,
 ) -> str:
     """
-    Send a message to the Letta agent and return the reply.
-    Letta handles all memory context internally.
+    Send a message to Claude via the Anthropic API and return the reply.
+    Claude manages its own memory via tool_use calls to Letta.
     After each interaction, we log to journal and sync state files.
     """
     try:
-        reply = letta_agent.ask(message)
+        reply = claude_client.ask(message)
     except Exception as e:
         logger.error("Agent request failed: %s", e)
         logs.write_event("error", f"Agent request failed: {e}", {"message": message[:200]})

@@ -89,17 +89,3 @@ def get_agent_id() -> str:
         _agent_id,
     )
     return _agent_id
-
-
-def ask(message: str) -> str:
-    """Send a message to the persistent Stuart agent and return the reply."""
-    client = get_client()
-    agent_id = get_agent_id()
-    response = client.agents.messages.create(
-        agent_id=agent_id,
-        messages=[{"role": "user", "content": message}],
-    )
-    for msg in response.messages:
-        if getattr(msg, "message_type", None) == "assistant_message":
-            return msg.content
-    return ""

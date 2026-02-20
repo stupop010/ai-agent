@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:timkellogg.me)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:docs.letta.com)",
+      "Bash(ssh root@46.225.190.185 \"curl -s http://localhost:8283/v1/health/\")",
+      "Bash(ssh root@46.225.190.185:*)",
+      "Bash(gh auth status:*)"
+    ]
+  }
+}
