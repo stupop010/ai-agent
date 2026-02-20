@@ -8,6 +8,7 @@ created for human review.
 SAFETY: The bot cannot restart itself or merge its own changes.
 Human review and deployment is always required.
 """
+import hashlib
 import os
 import subprocess
 import logging
@@ -351,7 +352,7 @@ def self_modify_workflow(
 
 def propose_code_change(
     file_path: str,
-    old_content: str,
+    content_hash: str,
     new_content: str,
     description: str,
 ) -> SelfModifyResult:
@@ -360,7 +361,7 @@ def propose_code_change(
 
     Args:
         file_path: Relative path to the file (from project root)
-        old_content: Expected current content (for verification)
+        content_hash: SHA-256 prefix hash from read_file (verifies file hasn't changed)
         new_content: New content to write
         description: Description of the change
 
@@ -379,15 +380,17 @@ def propose_code_change(
     full_path = PROJECT_ROOT / file_path
 
     def make_change():
-        # Verify current content matches expected
+        # Verify file hasn't changed since it was read
         if full_path.exists():
             current = full_path.read_text(encoding="utf-8")
-            if current != old_content:
+            current_hash = hashlib.sha256(current.encode("utf-8")).hexdigest()[:16]
+            if current_hash != content_hash:
                 raise SelfModifyError(
-                    f"File content doesn't match expected. "
-                    f"File may have been modified."
+                    f"File has been modified since it was read "
+                    f"(hash mismatch: {current_hash} != {content_hash}). "
+                    f"Read the file again and retry."
                 )
-        elif old_content:
+        elif content_hash:
             raise SelfModifyError(f"File doesn't exist: {file_path}")
 
         # Write new content

@@ -4,6 +4,7 @@ Direct Anthropic API client with tool_use for Letta memory management.
 Claude handles all reasoning directly. Letta is used solely as a persistent
 memory store, accessed via tool_use functions that map to memory_tools.py.
 """
+import hashlib
 import json
 import logging
 import os
@@ -109,7 +110,8 @@ TOOLS = [
         "description": (
             "Read a file from the project repository. Use this to inspect "
             "code before proposing changes. Path is relative to project root. "
-            "Returns up to 10,000 characters."
+            "Returns the file content (up to 10,000 chars) and a content_hash. "
+            "Pass the content_hash to edit_code to verify the file hasn't changed."
         ),
         "input_schema": {
             "type": "object",
@@ -128,7 +130,7 @@ TOOLS = [
             "Propose a code change to the bot's own source code. "
             "This commits the change to a dev branch and creates a GitHub PR "
             "for human review. Stuart must approve and merge before it takes effect. "
-            "You MUST read the file first to get the exact old_content."
+            "You MUST read the file first with read_file to get the content_hash."
         ),
         "input_schema": {
             "type": "object",
@@ -137,9 +139,9 @@ TOOLS = [
                     "type": "string",
                     "description": "Relative path to the file (e.g. 'bot/main.py')",
                 },
-                "old_content": {
+                "content_hash": {
                     "type": "string",
-                    "description": "The full current content of the file (must match exactly)",
+                    "description": "The content_hash returned by read_file (verifies file hasn't changed)",
                 },
                 "new_content": {
                     "type": "string",
@@ -150,7 +152,7 @@ TOOLS = [
                     "description": "Brief description of what the change does and why",
                 },
             },
-            "required": ["file_path", "old_content", "new_content", "description"],
+            "required": ["file_path", "content_hash", "new_content", "description"],
         },
     },
 ]
@@ -233,15 +235,17 @@ def _execute_tool(name: str, args: dict) -> str:
         if not full_path.is_file():
             return json.dumps({"error": f"File not found: {file_path}"})
         try:
-            content = full_path.read_text(encoding="utf-8")[:10_000]
-            return json.dumps({"file_path": file_path, "content": content})
+            raw = full_path.read_text(encoding="utf-8")
+            content_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+            content = raw[:10_000]
+            return json.dumps({"file_path": file_path, "content": content, "content_hash": content_hash})
         except Exception as e:
             return json.dumps({"error": f"Failed to read file: {e}"})
 
     elif name == "edit_code":
         result = self_modify.propose_code_change(
             args["file_path"],
-            args["old_content"],
+            args["content_hash"],
             args["new_content"],
             args["description"],
         )
