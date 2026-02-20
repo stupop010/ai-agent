@@ -29,6 +29,7 @@ _conversation_history: list[dict] = []
 MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 1024
 MAX_TOOL_ITERATIONS = 10
+MAX_HISTORY = 20  # Keep last N messages (user + assistant pairs)
 
 # ── Tool definitions for Claude tool_use ──────────────────────────────
 
@@ -443,6 +444,10 @@ def ask(message: str) -> str:
     global _conversation_history
 
     _conversation_history.append({"role": "user", "content": message})
+
+    # Trim to last N messages
+    if len(_conversation_history) > MAX_HISTORY:
+        _conversation_history = _conversation_history[-MAX_HISTORY:]
 
     system_prompt = _build_system_prompt()
     client = get_client()
