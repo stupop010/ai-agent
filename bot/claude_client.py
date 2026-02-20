@@ -304,12 +304,16 @@ def _build_system_prompt() -> str:
 
     now = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d %H:%M %Z")
 
+    persona = state.read("persona.md") or letta_agent.PERSONA
+    human = state.read("human.md") or letta_agent.HUMAN
+    limitations = state.read("limitations.md") or letta_agent.LIMITATIONS
+
     return (
         f"Current time: {now}\n\n"
-        f"{letta_agent.PERSONA}\n\n"
-        f"# About Stuart\n{letta_agent.HUMAN}\n\n"
+        f"{persona}\n\n"
+        f"# About Stuart\n{human}\n\n"
         f"{journal_section}"
-        f"{letta_agent.LIMITATIONS}\n"
+        f"{limitations}\n"
     )
 
 
