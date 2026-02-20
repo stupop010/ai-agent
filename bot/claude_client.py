@@ -13,6 +13,7 @@ import anthropic
 import letta_agent
 import logs
 import memory_tools
+import self_modify
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,55 @@ TOOLS = [
         "name": "web_search",
         "max_uses": 3,
     },
+    {
+        "name": "read_file",
+        "description": (
+            "Read a file from the project repository. Use this to inspect "
+            "code before proposing changes. Path is relative to project root. "
+            "Returns up to 10,000 characters."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Relative path to the file (e.g. 'bot/main.py')",
+                },
+            },
+            "required": ["file_path"],
+        },
+    },
+    {
+        "name": "edit_code",
+        "description": (
+            "Propose a code change to the bot's own source code. "
+            "This commits the change to a dev branch and creates a GitHub PR "
+            "for human review. Stuart must approve and merge before it takes effect. "
+            "You MUST read the file first to get the exact old_content."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Relative path to the file (e.g. 'bot/main.py')",
+                },
+                "old_content": {
+                    "type": "string",
+                    "description": "The full current content of the file (must match exactly)",
+                },
+                "new_content": {
+                    "type": "string",
+                    "description": "The new content to write to the file",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Brief description of what the change does and why",
+                },
+            },
+            "required": ["file_path", "old_content", "new_content", "description"],
+        },
+    },
 ]
 
 
@@ -174,6 +224,28 @@ def _execute_tool(name: str, args: dict) -> str:
         if ok:
             return json.dumps({"success": True, "label": args["label"]})
         return json.dumps({"error": f"Failed to create block '{args['label']}'"})
+
+    elif name == "read_file":
+        file_path = args["file_path"]
+        if self_modify._is_path_blocked(file_path):
+            return json.dumps({"error": f"Cannot read blocked path: {file_path}"})
+        full_path = self_modify.PROJECT_ROOT / file_path
+        if not full_path.is_file():
+            return json.dumps({"error": f"File not found: {file_path}"})
+        try:
+            content = full_path.read_text(encoding="utf-8")[:10_000]
+            return json.dumps({"file_path": file_path, "content": content})
+        except Exception as e:
+            return json.dumps({"error": f"Failed to read file: {e}"})
+
+    elif name == "edit_code":
+        result = self_modify.propose_code_change(
+            args["file_path"],
+            args["old_content"],
+            args["new_content"],
+            args["description"],
+        )
+        return json.dumps(result)
 
     return json.dumps({"error": f"Unknown tool: {name}"})
 

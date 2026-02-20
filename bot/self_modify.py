@@ -8,6 +8,7 @@ created for human review.
 SAFETY: The bot cannot restart itself or merge its own changes.
 Human review and deployment is always required.
 """
+import os
 import subprocess
 import logging
 from pathlib import Path
@@ -18,8 +19,8 @@ import logs
 
 logger = logging.getLogger(__name__)
 
-# Project paths
-PROJECT_ROOT = Path(__file__).parent.parent  # ai-agent/
+# Project paths — env var override for Docker (mounted repo at /repo)
+PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", Path(__file__).parent.parent))
 BOT_DIR = PROJECT_ROOT / "bot"
 
 # Git configuration
