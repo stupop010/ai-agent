@@ -1,6 +1,14 @@
-import json
+"""
+State file management — write-only mirror of Letta memory blocks.
+
+Letta memory blocks are the source of truth. After each interaction,
+we sync them to markdown files on disk so they're readable via
+VS Code, SSH, or the /state Discord command.
+"""
 import logging
 from pathlib import Path
+
+import letta_agent
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +30,7 @@ def write(filename: str, content: str) -> None:
 
 
 def format_for_prompt() -> str:
-    """Return all non-empty state files formatted for injection into a prompt."""
+    """Return all non-empty state files formatted for display."""
     _ensure_dir()
     parts = []
     for path in sorted(STATE_DIR.glob("*.md")):
@@ -31,30 +39,22 @@ def format_for_prompt() -> str:
             parts.append(f"### {path.name}\n{content}")
     if not parts:
         return ""
-    return "## Stuart's working memory:\n\n" + "\n\n".join(parts) + "\n\n"
+    return "## Agent's working memory:\n\n" + "\n\n".join(parts) + "\n\n"
 
 
-def apply_updates(raw: str) -> None:
-    """Parse JSON from an agent response and write any updated state files."""
-    text = raw.strip()
-    # Strip markdown code fence if present
-    if "```" in text:
-        start = text.find("```") + 3
-        end = text.rfind("```")
-        text = text[start:end].strip()
-        if text.startswith("json"):
-            text = text[4:].strip()
-    # Find the outermost JSON object
-    brace_start = text.find("{")
-    brace_end = text.rfind("}") + 1
-    if brace_start == -1 or brace_end == 0:
-        logger.warning("No JSON found in state update response")
-        return
+def sync_from_letta() -> None:
+    """Sync Letta memory blocks to state files on disk."""
+    _ensure_dir()
     try:
-        updates: dict[str, str] = json.loads(text[brace_start:brace_end])
-        for filename, content in updates.items():
-            if filename.endswith(".md"):
-                write(filename, content)
-                logger.info("State updated: %s", filename)
-    except json.JSONDecodeError as exc:
-        logger.warning("Failed to parse state update: %s", exc)
+        client = letta_agent.get_client()
+        agent_id = letta_agent.get_agent_id()
+        blocks = client.agents.blocks.list(agent_id=agent_id)
+
+        for block in blocks:
+            label = block.label
+            value = block.value or ""
+            if value.strip():
+                write(f"{label}.md", value)
+                logger.debug("Synced memory block to state: %s.md", label)
+    except Exception as e:
+        logger.warning("Failed to sync Letta blocks to state: %s", e)
