@@ -6,6 +6,7 @@ tools for memory, state, scheduling, and self-modification.
 """
 import logging
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from claude_agent_sdk import (
@@ -29,18 +30,58 @@ MODEL = "claude-sonnet-4-6"
 MAX_TOOL_ITERATIONS = 15
 MAX_HISTORY = 20  # Keep last N messages (user + assistant pairs)
 
-# Paths that must never be written to, regardless of what the agent decides
-BLOCKED_PATHS = [".env", ".db", "credentials", "secrets", "__pycache__", ".git",
-                 "bot/state/", "bot/logs/"]
+# Resolve repo root once at import time
+_REPO_ROOT = Path("/repo").resolve()
+
+# Directories — any file at or under these paths is blocked
+_BLOCKED_DIRS = [
+    _REPO_ROOT / "__pycache__",
+    _REPO_ROOT / ".git",
+    _REPO_ROOT / "bot" / "state",
+    _REPO_ROOT / "bot" / "logs",
+]
+
+# Name substrings — any file whose resolved name contains one of these is blocked
+_BLOCKED_NAME_PATTERNS = [".env", ".db", "credentials", "secrets"]
+
+
+def _is_path_blocked(raw_path: str) -> bool:
+    """Return True if raw_path resolves to a protected location.
+
+    Uses pathlib.resolve() so path-traversal tricks (e.g. /repo/safe/../.env)
+    are neutralised before any comparison is made.
+    """
+    if not raw_path:
+        return True
+    try:
+        resolved = Path(raw_path).resolve()
+    except Exception:
+        return True  # treat unparseable paths as blocked
+
+    # Check if path is inside (or exactly equal to) any blocked directory
+    for blocked_dir in _BLOCKED_DIRS:
+        try:
+            resolved.relative_to(blocked_dir)
+            return True
+        except ValueError:
+            pass
+        if resolved == blocked_dir:
+            return True
+
+    # Check filename against blocked name patterns
+    name_lower = resolved.name.lower()
+    if any(pattern in name_lower for pattern in _BLOCKED_NAME_PATTERNS):
+        return True
+
+    return False
 
 
 async def _can_use_tool(tool_name, input_data, context):
     """Hard safety guardrail blocking writes/edits to sensitive paths."""
     if tool_name in ("Write", "Edit"):
-        file_path = (input_data.get("file_path") or "").lower()
-        for blocked in BLOCKED_PATHS:
-            if blocked in file_path:
-                return PermissionResultDeny(message=f"Blocked: {file_path}")
+        raw_path = input_data.get("file_path") or ""
+        if _is_path_blocked(raw_path):
+            return PermissionResultDeny(message=f"Blocked: {raw_path}")
     return PermissionResultAllow(updated_input=input_data)
 
 
