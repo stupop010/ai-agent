@@ -29,7 +29,7 @@ class Tasks(commands.Cog):
     async def add(self, interaction: discord.Interaction, task: str):
         await interaction.response.defer()
         task_id = db.add_task(task)
-        reply = agent_interface.task_added(f"#{task_id}: {task}")
+        reply = await agent_interface.task_added(f"#{task_id}: {task}")
         await interaction.followup.send(f"**#{task_id}** — {task}\n{reply}")
 
     @app_commands.command(name="done", description="Mark a task as complete")
@@ -46,7 +46,7 @@ class Tasks(commands.Cog):
         if not success:
             await interaction.followup.send(f"No open task with ID #{task_id}.")
             return
-        reply = agent_interface.task_completed(task_desc)
+        reply = await agent_interface.task_completed(task_desc)
         await interaction.followup.send(f"Task #{task_id} marked done. {reply}")
 
     @app_commands.command(name="tasks", description="List all open tasks")
@@ -71,7 +71,7 @@ class Tasks(commands.Cog):
             f"#{t['id']} [{_age(t['created_at'])}] {t['description']}"
             for t in open_tasks
         ]
-        reply = agent_interface.focus_request(task_list)
+        reply = await agent_interface.focus_request(task_list)
         await interaction.followup.send(reply)
 
     @app_commands.command(name="state", description="Show the agent's current working memory")

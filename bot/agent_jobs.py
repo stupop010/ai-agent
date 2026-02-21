@@ -163,7 +163,7 @@ async def _run_job(job_id: str, message: str) -> None:
     logs.write_event("decision", f"Agent job firing: {job_id}", {"message": message[:200]})
 
     try:
-        reply = agent_interface.ask(
+        reply = await agent_interface.ask(
             f"[Scheduled reminder] {message}",
             topics=["scheduled", "agent-job"],
         )

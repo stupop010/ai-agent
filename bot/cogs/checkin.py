@@ -26,7 +26,7 @@ class Checkin(commands.Cog):
             "Ask him what he's planning to work on today and whether there's anything blocking him. "
             "Keep it to 2-3 sentences max."
         )
-        reply = agent_interface.ask(prompt, topics=["checkin", "manual"])
+        reply = await agent_interface.ask(prompt, topics=["checkin", "manual"])
         self._active_checkins.add(interaction.user.id)
         await interaction.followup.send(reply)
 
@@ -39,7 +39,7 @@ class Checkin(commands.Cog):
         # Check-in continuation takes priority
         if user_id in self._active_checkins:
             self._active_checkins.discard(user_id)
-            reply = agent_interface.checkin(message.content)
+            reply = await agent_interface.checkin(message.content)
             await message.reply(reply)
             return
 
@@ -47,7 +47,7 @@ class Checkin(commands.Cog):
         bot_channel_id = int(os.environ.get("CHANNEL_ID", 0))
         if message.channel.id == bot_channel_id:
             async with message.channel.typing():
-                reply = agent_interface.ask(
+                reply = await agent_interface.ask(
                     message.content,
                     topics=["chat", "conversation"],
                 )
@@ -64,7 +64,7 @@ class Checkin(commands.Cog):
             "Start the day with a brief, energising message asking what he's focused on today. "
             "Reference any active commitments or projects if relevant. 2-3 sentences max. No fluff."
         )
-        reply = agent_interface.ask(prompt, topics=["checkin", "morning", "scheduled"])
+        reply = await agent_interface.ask(prompt, topics=["checkin", "morning", "scheduled"])
         await channel.send(f"**Morning check-in**\n{reply}")
 
     async def send_eod_review(self, channel: discord.TextChannel):
@@ -74,7 +74,7 @@ class Checkin(commands.Cog):
         completed_list = [t["description"] for t in completed]
         open_list = [f"#{t['id']}: {t['description']}" for t in open_tasks]
 
-        reply = agent_interface.eod_review(open_list, completed_list)
+        reply = await agent_interface.eod_review(open_list, completed_list)
         await channel.send(f"**End-of-day review**\n{reply}")
 
 

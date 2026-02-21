@@ -2,8 +2,8 @@
 Unified agent interface with logging and state sync.
 
 This module provides the primary interface for all agent interactions.
-Claude handles reasoning via direct Anthropic API calls. Letta is used
-as a persistent memory store. After each interaction we:
+Claude handles reasoning via the Agent SDK (or fallback API). Letta is
+used as a persistent memory store. After each interaction we:
 - Log to the journal (temporal awareness layer)
 - Sync Letta memory blocks to state files (readable on disk)
 """
@@ -16,19 +16,19 @@ import state
 logger = logging.getLogger(__name__)
 
 
-def ask(
+async def ask(
     message: str,
     *,
     topics: list[str] | None = None,
     user_stated: str | None = None,
 ) -> str:
     """
-    Send a message to Claude via the Anthropic API and return the reply.
-    Claude manages its own memory via tool_use calls to Letta.
+    Send a message to Claude via the Agent SDK and return the reply.
+    Claude manages its own memory via MCP tool calls to Letta.
     After each interaction, we log to journal and sync state files.
     """
     try:
-        reply = claude_client.ask(message)
+        reply = await claude_client.ask(message)
     except Exception as e:
         logger.error("Agent request failed: %s", e)
         logs.write_event("error", f"Agent request failed: {e}", {"message": message[:200]})
@@ -70,45 +70,45 @@ def _summarize_interaction(message: str, reply: str) -> str:
 # Convenience functions for common interaction patterns
 
 
-def checkin(user_message: str) -> str:
+async def checkin(user_message: str) -> str:
     """Handle a check-in interaction."""
-    return ask(
+    return await ask(
         user_message,
         topics=["checkin", "daily"],
     )
 
 
-def task_added(task_description: str) -> str:
+async def task_added(task_description: str) -> str:
     """Acknowledge a newly added task."""
-    return ask(
+    return await ask(
         f"Stuart just added a new task: {task_description}\n\nAcknowledge briefly.",
         topics=["task", "added"],
     )
 
 
-def task_completed(task_description: str) -> str:
+async def task_completed(task_description: str) -> str:
     """Celebrate a completed task."""
-    return ask(
+    return await ask(
         f"Stuart just completed: {task_description}\n\nGive brief encouragement.",
         topics=["task", "completed"],
     )
 
 
-def focus_request(open_tasks: list[str]) -> str:
+async def focus_request(open_tasks: list[str]) -> str:
     """Ask the agent for focus recommendation."""
     tasks_formatted = "\n".join(f"- {t}" for t in open_tasks)
-    return ask(
+    return await ask(
         f"Stuart's open tasks:\n{tasks_formatted}\n\nWhich should he focus on first and why?",
         topics=["focus", "prioritization"],
     )
 
 
-def perch_review(open_tasks: list[str], completed_today: list[str]) -> str:
+async def perch_review(open_tasks: list[str], completed_today: list[str]) -> str:
     """Autonomous review during perch time."""
     open_formatted = "\n".join(f"- {t}" for t in open_tasks) if open_tasks else "(none)"
     done_formatted = "\n".join(f"- {t}" for t in completed_today) if completed_today else "(none)"
 
-    return ask(
+    return await ask(
         f"""Perch review time. Check in on Stuart's progress.
 
 Open tasks:
@@ -122,12 +122,12 @@ If you notice anything concerning (procrastination, stalled tasks, focus issues)
     )
 
 
-def eod_review(open_tasks: list[str], completed_today: list[str]) -> str:
+async def eod_review(open_tasks: list[str], completed_today: list[str]) -> str:
     """End of day review."""
     open_formatted = "\n".join(f"- {t}" for t in open_tasks) if open_tasks else "(none)"
     done_formatted = "\n".join(f"- {t}" for t in completed_today) if completed_today else "(none)"
 
-    return ask(
+    return await ask(
         f"""End of day review.
 
 Completed today:

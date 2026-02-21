@@ -59,7 +59,7 @@ def build_scheduler(bot) -> AsyncIOScheduler:
                 return
             channel = await _get_channel()
             for task in stale:
-                reply = agent_interface.ask(
+                reply = await agent_interface.ask(
                     f'Task #{task["id"]} has been open for over 24 hours: "{task["description"]}". '
                     "Send a short, direct nudge to Stuart — not more than one sentence. "
                     "Don't be preachy.",
@@ -91,7 +91,7 @@ def build_scheduler(bot) -> AsyncIOScheduler:
             ]
             completed_list = [t["description"] for t in completed_today]
 
-            reply = agent_interface.perch_review(open_list, completed_list)
+            reply = await agent_interface.perch_review(open_list, completed_list)
 
             # Only send if the agent has something to say
             if reply.strip().upper() != "OK" and reply.strip():

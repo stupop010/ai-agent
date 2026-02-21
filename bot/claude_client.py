@@ -1,8 +1,9 @@
 """
-Direct Anthropic API client with tool_use for Letta memory management.
+Claude Agent SDK client with Letta memory integration.
 
-Claude handles all reasoning directly. Letta is used solely as a persistent
-memory store, accessed via tool_use functions that map to memory_tools.py.
+Uses the Claude Agent SDK (ClaudeSDKClient) for reasoning, with custom MCP
+tools for memory, state, scheduling, and self-modification. Falls back to
+the raw Anthropic API if the SDK is unavailable.
 """
 import hashlib
 import json
@@ -10,8 +11,6 @@ import logging
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
-import anthropic
 
 import agent_jobs
 import bot_context
@@ -23,7 +22,6 @@ import state
 
 logger = logging.getLogger(__name__)
 
-_client: anthropic.Anthropic | None = None
 _conversation_history: list[dict] = []
 
 MODEL = "claude-sonnet-4-6"
@@ -31,265 +29,8 @@ MAX_TOKENS = 1024
 MAX_TOOL_ITERATIONS = 10
 MAX_HISTORY = 20  # Keep last N messages (user + assistant pairs)
 
-# ── Tool definitions for Claude tool_use ──────────────────────────────
 
-TOOLS = [
-    {
-        "name": "read_memory",
-        "description": (
-            "Read a specific memory block from persistent storage. "
-            "Use this to recall information you've previously stored. "
-            "Common labels: persona, human, patterns, limitations, current_focus"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string",
-                    "description": "The label of the memory block to read",
-                },
-            },
-            "required": ["label"],
-        },
-    },
-    {
-        "name": "update_memory",
-        "description": (
-            "Update an existing memory block in persistent storage. "
-            "Use this to save observations, update patterns, or record changes "
-            "in Stuart's focus/commitments."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string",
-                    "description": "The label of the memory block to update",
-                },
-                "value": {
-                    "type": "string",
-                    "description": "The new content for the memory block",
-                },
-            },
-            "required": ["label", "value"],
-        },
-    },
-    {
-        "name": "list_memories",
-        "description": (
-            "List all memory blocks in persistent storage. "
-            "Returns labels and truncated previews of each block."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-    {
-        "name": "create_memory",
-        "description": (
-            "Create a new memory block in persistent storage. "
-            "Use this to store new categories of information about Stuart."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string",
-                    "description": "The label for the new memory block",
-                },
-                "value": {
-                    "type": "string",
-                    "description": "The initial content for the memory block",
-                },
-            },
-            "required": ["label", "value"],
-        },
-    },
-    {
-        "name": "read_state",
-        "description": (
-            "Read a working-memory state file from bot/state/. "
-            "Use this to check commitments, projects, patterns, current_focus, "
-            "or any other .md file you've previously written."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "filename": {
-                    "type": "string",
-                    "description": "Name of the .md file to read (e.g. 'commitments.md')",
-                },
-            },
-            "required": ["filename"],
-        },
-    },
-    {
-        "name": "write_state",
-        "description": (
-            "Write to a working-memory state file in bot/state/. "
-            "Use this to persist commitments, projects, patterns, current_focus, "
-            "or any working memory you want to recall later."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "filename": {
-                    "type": "string",
-                    "description": "Name of the .md file to write (e.g. 'commitments.md')",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The full content to write to the file",
-                },
-            },
-            "required": ["filename", "content"],
-        },
-    },
-    {
-        "name": "list_state",
-        "description": (
-            "List all working-memory state files in bot/state/ with previews. "
-            "Use this to see what state files exist before reading one."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-    {
-        "type": "web_search_20250305",
-        "name": "web_search",
-        "max_uses": 3,
-    },
-    {
-        "name": "read_file",
-        "description": (
-            "Read a file from the project repository. Use this to inspect "
-            "code before proposing changes. Path is relative to project root. "
-            "Returns the file content (up to 10,000 chars) and a content_hash. "
-            "Pass the content_hash to edit_code to verify the file hasn't changed."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Relative path to the file (e.g. 'bot/main.py')",
-                },
-            },
-            "required": ["file_path"],
-        },
-    },
-    {
-        "name": "edit_code",
-        "description": (
-            "Propose a code change to the bot's own source code. "
-            "This commits the change to a dev branch and creates a GitHub PR "
-            "for human review. Stuart must approve and merge before it takes effect. "
-            "You MUST read the file first with read_file to get the content_hash."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Relative path to the file (e.g. 'bot/main.py')",
-                },
-                "content_hash": {
-                    "type": "string",
-                    "description": "The content_hash returned by read_file (verifies file hasn't changed)",
-                },
-                "new_content": {
-                    "type": "string",
-                    "description": "The new content to write to the file",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Brief description of what the change does and why",
-                },
-            },
-            "required": ["file_path", "content_hash", "new_content", "description"],
-        },
-    },
-    {
-        "name": "schedule_job",
-        "description": (
-            "Schedule a one-shot or recurring job. For one-shot reminders, "
-            "provide run_at (ISO datetime). For recurring jobs, provide hour "
-            "and minute (and optionally day_of_week like 'mon', 'mon-fri', 'mon,wed,fri'). "
-            "The message is what you'll be asked to respond to when the job fires."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "job_id": {
-                    "type": "string",
-                    "description": "Short identifier for the job (e.g. 'proposal-followup')",
-                },
-                "message": {
-                    "type": "string",
-                    "description": "The message/prompt you'll receive when the job fires",
-                },
-                "run_at": {
-                    "type": "string",
-                    "description": "ISO datetime for one-shot jobs (e.g. '2026-02-20T15:00:00+00:00')",
-                },
-                "hour": {
-                    "type": "integer",
-                    "description": "Hour (0-23) for recurring jobs",
-                },
-                "minute": {
-                    "type": "integer",
-                    "description": "Minute (0-59) for recurring jobs",
-                },
-                "day_of_week": {
-                    "type": "string",
-                    "description": "Day(s) of week for recurring jobs (e.g. 'mon', 'mon-fri')",
-                },
-            },
-            "required": ["job_id", "message"],
-        },
-    },
-    {
-        "name": "cancel_job",
-        "description": (
-            "Cancel an agent-created scheduled job by its ID."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "job_id": {
-                    "type": "string",
-                    "description": "The job ID to cancel (without the 'agent-' prefix)",
-                },
-            },
-            "required": ["job_id"],
-        },
-    },
-    {
-        "name": "list_jobs",
-        "description": (
-            "List all agent-created scheduled jobs. Shows job IDs, messages, "
-            "types (once/recurring), and schedules."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-]
-
-
-# ── Client & helpers ──────────────────────────────────────────────────
-
-
-def get_client() -> anthropic.Anthropic:
-    """Return (and lazily create) the Anthropic client singleton."""
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    return _client
+# ── System prompt ────────────────────────────────────────────────────
 
 
 def _build_system_prompt() -> str:
@@ -318,8 +59,249 @@ def _build_system_prompt() -> str:
     )
 
 
+# ── SDK-based ask() ──────────────────────────────────────────────────
+
+
+async def ask(message: str) -> str:
+    """
+    Send a message to Claude via the Agent SDK.
+
+    Uses ClaudeSDKClient with custom MCP tools for memory/state/scheduling.
+    Falls back to the raw Anthropic API if the SDK is unavailable or fails.
+    """
+    global _conversation_history
+
+    # Try SDK first, fall back to raw API
+    try:
+        reply = await _ask_sdk(message)
+    except Exception as e:
+        logger.warning("SDK ask failed (%s), falling back to API", e)
+        reply = _ask_fallback(message)
+
+    return reply
+
+
+async def _ask_sdk(message: str) -> str:
+    """Send a message using the Claude Agent SDK with custom MCP tools."""
+    from claude_agent_sdk import (
+        ClaudeSDKClient,
+        ClaudeAgentOptions,
+        AssistantMessage,
+        TextBlock,
+        ResultMessage,
+    )
+    from mcp_tools import mcp_server, ALLOWED_TOOL_NAMES
+
+    global _conversation_history
+
+    _conversation_history.append({"role": "user", "content": message})
+
+    system_prompt = _build_system_prompt()
+
+    # Inject recent conversation history into the prompt for context
+    history_context = _format_history_for_prompt()
+    if history_context:
+        full_prompt = f"{history_context}\n\nUser: {message}"
+    else:
+        full_prompt = message
+
+    options = ClaudeAgentOptions(
+        system_prompt=system_prompt,
+        model=MODEL,
+        mcp_servers={"bot": mcp_server},
+        allowed_tools=ALLOWED_TOOL_NAMES + ["WebSearch"],
+        permission_mode="bypassPermissions",
+        max_turns=MAX_TOOL_ITERATIONS,
+    )
+
+    result_parts = []
+
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(full_prompt)
+
+        async for msg in client.receive_response():
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        result_parts.append(block.text)
+            elif isinstance(msg, ResultMessage):
+                if msg.is_error:
+                    logger.error("SDK returned error: %s", msg.result)
+                    if msg.result:
+                        result_parts.append(msg.result)
+
+    reply = "\n".join(result_parts) if result_parts else ""
+
+    _conversation_history.append({"role": "assistant", "content": reply})
+    return reply
+
+
+def _format_history_for_prompt() -> str:
+    """Format recent conversation history for injection into the prompt."""
+    if not _conversation_history:
+        return ""
+
+    # Keep last 10 messages for context
+    recent = _conversation_history[-10:]
+    parts = []
+    for msg in recent:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        content = msg["content"]
+        if isinstance(content, str) and content.strip():
+            # Truncate long messages
+            if len(content) > 500:
+                content = content[:500] + "..."
+            parts.append(f"{role}: {content}")
+
+    if not parts:
+        return ""
+
+    return "Recent conversation:\n" + "\n".join(parts)
+
+
+# ── Fallback: raw Anthropic API ──────────────────────────────────────
+
+_api_client = None
+
+
+def _get_api_client():
+    """Return (and lazily create) the Anthropic API client singleton."""
+    global _api_client
+    if _api_client is None:
+        import anthropic
+        _api_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    return _api_client
+
+
+# Tool definitions for fallback mode
+FALLBACK_TOOLS = [
+    {
+        "name": "read_memory",
+        "description": "Read a specific memory block from persistent storage.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"label": {"type": "string"}},
+            "required": ["label"],
+        },
+    },
+    {
+        "name": "update_memory",
+        "description": "Update an existing memory block in persistent storage.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["label", "value"],
+        },
+    },
+    {
+        "name": "list_memories",
+        "description": "List all memory blocks in persistent storage.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "create_memory",
+        "description": "Create a new memory block in persistent storage.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["label", "value"],
+        },
+    },
+    {
+        "name": "read_state",
+        "description": "Read a working-memory state file from bot/state/.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"filename": {"type": "string"}},
+            "required": ["filename"],
+        },
+    },
+    {
+        "name": "write_state",
+        "description": "Write to a working-memory state file in bot/state/.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["filename", "content"],
+        },
+    },
+    {
+        "name": "list_state",
+        "description": "List all working-memory state files in bot/state/.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "type": "web_search_20250305",
+        "name": "web_search",
+        "max_uses": 3,
+    },
+    {
+        "name": "read_file",
+        "description": "Read a file from the project repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"file_path": {"type": "string"}},
+            "required": ["file_path"],
+        },
+    },
+    {
+        "name": "edit_code",
+        "description": "Propose a code change via PR.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string"},
+                "content_hash": {"type": "string"},
+                "new_content": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["file_path", "content_hash", "new_content", "description"],
+        },
+    },
+    {
+        "name": "schedule_job",
+        "description": "Schedule a one-shot or recurring job.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+                "message": {"type": "string"},
+                "run_at": {"type": "string"},
+                "hour": {"type": "integer"},
+                "minute": {"type": "integer"},
+                "day_of_week": {"type": "string"},
+            },
+            "required": ["job_id", "message"],
+        },
+    },
+    {
+        "name": "cancel_job",
+        "description": "Cancel an agent-created scheduled job.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"job_id": {"type": "string"}},
+            "required": ["job_id"],
+        },
+    },
+    {
+        "name": "list_jobs",
+        "description": "List all agent-created scheduled jobs.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+]
+
+
 def _execute_tool(name: str, args: dict) -> str:
-    """Dispatch a tool call to the corresponding memory_tools function."""
+    """Dispatch a tool call (fallback mode)."""
     client = letta_agent.get_client()
     agent_id = letta_agent.get_agent_id()
 
@@ -387,10 +369,7 @@ def _execute_tool(name: str, args: dict) -> str:
 
     elif name == "edit_code":
         result = self_modify.propose_code_change(
-            args["file_path"],
-            args["content_hash"],
-            args["new_content"],
-            args["description"],
+            args["file_path"], args["content_hash"], args["new_content"], args["description"],
         )
         return json.dumps(result)
 
@@ -406,11 +385,8 @@ def _execute_tool(name: str, args: dict) -> str:
         if "day_of_week" in args:
             cron_args["day_of_week"] = args["day_of_week"]
         result = agent_jobs.add_job(
-            bot.scheduler,
-            args["job_id"],
-            args["message"],
-            cron_args=cron_args if cron_args else None,
-            run_at=args.get("run_at"),
+            bot.scheduler, args["job_id"], args["message"],
+            cron_args=cron_args if cron_args else None, run_at=args.get("run_at"),
         )
         return json.dumps(result)
 
@@ -428,18 +404,10 @@ def _execute_tool(name: str, args: dict) -> str:
     return json.dumps({"error": f"Unknown tool: {name}"})
 
 
-# ── Main ask() with tool_use loop ─────────────────────────────────────
-
-
-def ask(message: str) -> str:
+def _ask_fallback(message: str) -> str:
     """
-    Send a message to Claude via the Anthropic API.
-
-    If Claude responds with tool_use, execute the tools and feed results
-    back until Claude produces a text response (up to MAX_TOOL_ITERATIONS).
-
-    Only text messages are kept in conversation history; tool exchanges
-    are ephemeral (memory blocks are the persistent state).
+    Fallback: send a message via the raw Anthropic API with tool_use loop.
+    Used when the SDK is unavailable or fails.
     """
     global _conversation_history
 
@@ -450,9 +418,8 @@ def ask(message: str) -> str:
         _conversation_history = _conversation_history[-MAX_HISTORY:]
 
     system_prompt = _build_system_prompt()
-    client = get_client()
+    client = _get_api_client()
 
-    # Working messages include history + any tool exchanges for this turn
     working_messages = list(_conversation_history)
 
     for _ in range(MAX_TOOL_ITERATIONS):
@@ -460,51 +427,37 @@ def ask(message: str) -> str:
             model=MODEL,
             max_tokens=MAX_TOKENS,
             system=system_prompt,
-            tools=TOOLS,
+            tools=FALLBACK_TOOLS,
             messages=working_messages,
         )
 
-        # If Claude gives a text response (possibly with tool_use), check stop reason
         if response.stop_reason == "end_turn":
-            # Extract text from the response
-            text_parts = [
-                block.text for block in response.content if block.type == "text"
-            ]
+            text_parts = [block.text for block in response.content if block.type == "text"]
             reply = "\n".join(text_parts) if text_parts else ""
-
-            # Store only the text reply in persistent history
             _conversation_history.append({"role": "assistant", "content": reply})
             return reply
 
         if response.stop_reason == "tool_use":
-            # Add Claude's response (with tool_use blocks) to working messages
             working_messages.append({"role": "assistant", "content": response.content})
-
-            # Execute each tool call and collect results
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    logger.info("Tool call: %s(%s)", block.name, json.dumps(block.input)[:100])
+                    logger.info("Tool call (fallback): %s(%s)", block.name, json.dumps(block.input)[:100])
                     result = _execute_tool(block.name, block.input)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
                         "content": result,
                     })
-
             working_messages.append({"role": "user", "content": tool_results})
             continue
 
-        # Unexpected stop reason — extract whatever text we got
-        text_parts = [
-            block.text for block in response.content if block.type == "text"
-        ]
+        text_parts = [block.text for block in response.content if block.type == "text"]
         reply = "\n".join(text_parts) if text_parts else ""
         _conversation_history.append({"role": "assistant", "content": reply})
         return reply
 
-    # Safety valve: hit max iterations
-    logger.warning("Hit max tool iterations (%d)", MAX_TOOL_ITERATIONS)
+    logger.warning("Hit max tool iterations (%d) in fallback", MAX_TOOL_ITERATIONS)
     _conversation_history.append({
         "role": "assistant",
         "content": "I got caught in a loop processing that. Could you try again?",
