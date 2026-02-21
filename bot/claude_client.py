@@ -96,6 +96,10 @@ async def _ask_sdk(message: str) -> str:
 
     _conversation_history.append({"role": "user", "content": message})
 
+    # Trim to prevent unbounded growth
+    if len(_conversation_history) > MAX_HISTORY:
+        _conversation_history = _conversation_history[-MAX_HISTORY:]
+
     system_prompt = _build_system_prompt()
 
     # Inject recent conversation history into the prompt for context
