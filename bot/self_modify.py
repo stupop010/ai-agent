@@ -2,19 +2,26 @@
 Self-modification workflow with PR-based human review.
 
 Allows the agent to propose changes to its own code through a safe
-workflow: changes go to a dev branch, validation runs, and a PR is
-created for human review.
+workflow: spawns a Claude Code session to make changes on a dev branch,
+then creates a PR for human review.
 
 SAFETY: The bot cannot restart itself or merge its own changes.
 Human review and deployment is always required.
 """
-import hashlib
 import os
 import subprocess
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Callable, TypedDict
+from typing import TypedDict
+
+from claude_agent_sdk import (
+    ClaudeSDKClient,
+    ClaudeAgentOptions,
+    AssistantMessage,
+    TextBlock,
+    ResultMessage,
+)
 
 import logs
 
@@ -28,9 +35,6 @@ BOT_DIR = PROJECT_ROOT / "bot"
 DEV_BRANCH = "dev"
 MAIN_BRANCH = "main"
 
-# Safety limits
-MAX_PRS_PER_DAY = 5
-
 # Blocked paths - files the bot should never modify
 BLOCKED_PATHS = [
     ".env",
@@ -41,17 +45,30 @@ BLOCKED_PATHS = [
     ".git",
 ]
 
+# System prompt for the inner Claude Code session
+_INNER_SYSTEM_PROMPT = """\
+You are modifying the Stuart's Accountability Bot codebase.
+
+Project structure:
+- bot/ — Python source (main.py, claude_client.py, agent_interface.py, mcp_tools.py, etc.)
+- bot/state/ — runtime state files (gitignored, do not modify)
+- bot/logs/ — journal logs (gitignored, do not modify)
+- bot/Dockerfile — container build
+
+Constraints:
+- NEVER modify: .env, *.db, credentials*, secrets*, __pycache__/, .git/
+- NEVER modify bot/state/ or bot/logs/ contents
+- Python 3.11+, no type stubs needed
+- Imports are local modules (no package prefix) — bot runs from bot/ as working dir
+- Keep changes minimal and focused on the requested task
+- Do NOT add unnecessary comments, docstrings, or type annotations beyond what's needed
+"""
+
 
 class SelfModifyResult(TypedDict):
     success: bool
-    validation_passed: bool
     pr_url: str | None
     message: str
-
-
-class SelfModifyError(Exception):
-    """Error during self-modification workflow."""
-    pass
 
 
 def _run_git(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
@@ -114,65 +131,6 @@ def ensure_dev_branch() -> bool:
     except subprocess.CalledProcessError as e:
         logger.error("Failed to ensure dev branch: %s", e)
         return False
-
-
-def run_validation() -> tuple[bool, str]:
-    """
-    Run pyright and pytest validation.
-
-    Returns:
-        Tuple of (success, output_message)
-    """
-    results = []
-    success = True
-
-    # Run pyright type checking
-    try:
-        result = subprocess.run(
-            ["pyright", "bot/"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            success = False
-            results.append(f"Pyright FAILED:\n{result.stdout}\n{result.stderr}")
-        else:
-            results.append("Pyright: OK")
-    except FileNotFoundError:
-        results.append("Pyright: Not installed (skipped)")
-    except subprocess.TimeoutExpired:
-        success = False
-        results.append("Pyright: Timeout")
-    except Exception as e:
-        success = False
-        results.append(f"Pyright error: {e}")
-
-    # Run pytest
-    try:
-        result = subprocess.run(
-            ["pytest", "tests/", "-v", "--tb=short"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if result.returncode != 0:
-            success = False
-            results.append(f"Pytest FAILED:\n{result.stdout}\n{result.stderr}")
-        else:
-            results.append("Pytest: OK")
-    except FileNotFoundError:
-        results.append("Pytest: No tests directory found (skipped)")
-    except subprocess.TimeoutExpired:
-        success = False
-        results.append("Pytest: Timeout")
-    except Exception as e:
-        success = False
-        results.append(f"Pytest error: {e}")
-
-    return success, "\n".join(results)
 
 
 def commit_and_push(message: str) -> bool:
@@ -250,29 +208,31 @@ def revert_changes() -> bool:
         return False
 
 
-def self_modify_workflow(
-    description: str,
-    changes_callback: Callable[[], None],
-) -> SelfModifyResult:
-    """
-    Full self-modification workflow with safety guardrails.
+def _can_use_tool(tool_name: str, tool_input: dict) -> bool:
+    """Block writes to sensitive paths in the inner Claude Code session."""
+    if tool_name in ("Write", "Edit"):
+        file_path = tool_input.get("file_path", "")
+        if _is_path_blocked(file_path):
+            return False
+    return True
 
-    1. Switch to dev branch
-    2. Make changes via callback
-    3. Run validation (pyright + pytest)
-    4. If valid, commit and create PR
-    5. Return result (human must review and merge)
+
+async def propose_change(description: str) -> SelfModifyResult:
+    """
+    Propose a code change using an inner Claude Code session.
+
+    Spawns a Claude Code agent with Read/Write/Edit/Grep/Glob tools
+    that makes changes like a developer, then commits to a dev branch
+    and creates a PR for human review.
 
     Args:
-        description: Brief description of the changes
-        changes_callback: Function that makes the actual file changes
+        description: What to change and why
 
     Returns:
         SelfModifyResult with success status and PR URL
     """
     result: SelfModifyResult = {
         "success": False,
-        "validation_passed": False,
         "pr_url": None,
         "message": "",
     }
@@ -283,53 +243,43 @@ def self_modify_workflow(
         {"description": description},
     )
 
-    # Step 1: Ensure dev branch
+    # Step 1: Switch to dev branch
     if not ensure_dev_branch():
         result["message"] = "Failed to switch to dev branch"
         logs.write_event("error", result["message"])
         return result
 
-    # Step 2: Make changes
+    # Step 2: Spawn inner Claude Code session to make changes
     try:
-        changes_callback()
+        response_text = await _run_inner_session(description)
     except Exception as e:
-        result["message"] = f"Failed to apply changes: {e}"
+        result["message"] = f"Inner Claude Code session failed: {e}"
         logs.write_event("error", result["message"])
         revert_changes()
+        _run_git(["checkout", MAIN_BRANCH], check=False)
         return result
 
-    # Step 3: Run validation
-    valid, validation_output = run_validation()
-    result["validation_passed"] = valid
-
-    if not valid:
-        result["message"] = f"Validation failed:\n{validation_output}"
-        logs.write_event("warning", "Self-modify validation failed", {"output": validation_output[:500]})
-        revert_changes()
-        return result
-
-    # Step 4: Commit and push
+    # Step 3: Commit and push
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     commit_msg = f"[self-modify] {description}\n\nAutomated change at {timestamp}"
 
     if not commit_and_push(commit_msg):
-        result["message"] = "No changes to commit or push failed"
+        result["message"] = "No changes were made by the inner session"
+        _run_git(["checkout", MAIN_BRANCH], check=False)
         return result
 
-    # Step 5: Create PR
+    # Step 4: Create PR
     pr_body = f"""## Self-Modification Request
 
 **Description:** {description}
 
-**Validation Results:**
-```
-{validation_output}
-```
+**Claude Code Session Output:**
+{response_text[:3000]}
 
 ---
 *This PR was created automatically by the bot's self-modification system.*
 *Please review carefully before merging.*
-*The bot cannot restart itself - deployment must be done manually.*
+*The bot cannot restart itself — deployment must be done manually.*
 """
 
     pr_url = create_pr(f"[Bot] {description}", pr_body)
@@ -347,54 +297,37 @@ def self_modify_workflow(
         result["message"] = "Changes committed but PR creation failed. Check GitHub manually."
         logs.write_event("warning", "PR creation failed after successful commit")
 
+    # Step 5: Switch back to main
+    _run_git(["checkout", MAIN_BRANCH], check=False)
+
     return result
 
 
-def propose_code_change(
-    file_path: str,
-    content_hash: str,
-    new_content: str,
-    description: str,
-) -> SelfModifyResult:
-    """
-    Propose a specific code change via the self-modify workflow.
+async def _run_inner_session(description: str) -> str:
+    """Run the inner Claude Code session and return its response text."""
+    options = ClaudeAgentOptions(
+        system_prompt=_INNER_SYSTEM_PROMPT,
+        model="claude-sonnet-4-6",
+        allowed_tools=["Read", "Write", "Edit", "Grep", "Glob"],
+        permission_mode="bypassPermissions",
+        max_turns=25,
+        cwd=str(PROJECT_ROOT),
+    )
 
-    Args:
-        file_path: Relative path to the file (from project root)
-        content_hash: SHA-256 prefix hash from read_file (verifies file hasn't changed)
-        new_content: New content to write
-        description: Description of the change
+    result_parts = []
 
-    Returns:
-        SelfModifyResult
-    """
-    # Security check
-    if _is_path_blocked(file_path):
-        return {
-            "success": False,
-            "validation_passed": False,
-            "pr_url": None,
-            "message": f"Cannot modify blocked path: {file_path}",
-        }
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(description)
 
-    full_path = PROJECT_ROOT / file_path
+        async for msg in client.receive_response():
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        result_parts.append(block.text)
+            elif isinstance(msg, ResultMessage):
+                if msg.is_error:
+                    logger.error("Inner session error: %s", msg.result)
+                    if msg.result:
+                        result_parts.append(f"Error: {msg.result}")
 
-    def make_change():
-        # Verify file hasn't changed since it was read
-        if full_path.exists():
-            current = full_path.read_text(encoding="utf-8")
-            current_hash = hashlib.sha256(current.encode("utf-8")).hexdigest()[:16]
-            if current_hash != content_hash:
-                raise SelfModifyError(
-                    f"File has been modified since it was read "
-                    f"(hash mismatch: {current_hash} != {content_hash}). "
-                    f"Read the file again and retry."
-                )
-        elif content_hash:
-            raise SelfModifyError(f"File doesn't exist: {file_path}")
-
-        # Write new content
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(new_content, encoding="utf-8")
-
-    return self_modify_workflow(description, make_change)
+    return "\n".join(result_parts) if result_parts else "(no output)"

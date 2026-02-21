@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _conversation_history: list[dict] = []
 
 MODEL = "claude-sonnet-4-6"
-MAX_TOOL_ITERATIONS = 10
+MAX_TOOL_ITERATIONS = 15
 MAX_HISTORY = 20  # Keep last N messages (user + assistant pairs)
 
 

@@ -4,7 +4,6 @@ MCP tool definitions for the Claude Agent SDK.
 Each tool wraps existing logic from claude_client._execute_tool(),
 exposing it via the @tool decorator for use with create_sdk_mcp_server.
 """
-import hashlib
 import json
 import logging
 from typing import Any
@@ -173,56 +172,15 @@ async def list_state_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
-    "read_file",
-    "Read a file from the project repository. Use this to inspect "
-    "code before proposing changes. Path is relative to project root. "
-    "Returns the file content (up to 10,000 chars) and a content_hash. "
-    "Pass the content_hash to edit_code to verify the file hasn't changed.",
-    {"file_path": str},
-)
-async def read_file_tool(args: dict[str, Any]) -> dict[str, Any]:
-    file_path = args["file_path"]
-    if self_modify._is_path_blocked(file_path):
-        text = json.dumps({"error": f"Cannot read blocked path: {file_path}"})
-    else:
-        full_path = self_modify.PROJECT_ROOT / file_path
-        if not full_path.is_file():
-            text = json.dumps({"error": f"File not found: {file_path}"})
-        else:
-            try:
-                raw = full_path.read_text(encoding="utf-8")
-                content_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-                content = raw[:10_000]
-                text = json.dumps({"file_path": file_path, "content": content, "content_hash": content_hash})
-            except Exception as e:
-                text = json.dumps({"error": f"Failed to read file: {e}"})
-    return {"content": [{"type": "text", "text": text}]}
-
-
-@tool(
-    "edit_code",
+    "propose_change",
     "Propose a code change to the bot's own source code. "
-    "This commits the change to a dev branch and creates a GitHub PR "
-    "for human review. Stuart must approve and merge before it takes effect. "
-    "You MUST read the file first with read_file to get the content_hash.",
-    {
-        "type": "object",
-        "properties": {
-            "file_path": {"type": "string", "description": "Relative path to the file (e.g. 'bot/main.py')"},
-            "content_hash": {"type": "string", "description": "The content_hash returned by read_file"},
-            "new_content": {"type": "string", "description": "The new content to write to the file"},
-            "description": {"type": "string", "description": "Brief description of what the change does and why"},
-        },
-        "required": ["file_path", "content_hash", "new_content", "description"],
-    },
+    "This spawns a Claude Code session that can read, search, and edit files, "
+    "then commits to a dev branch and creates a GitHub PR for human review. "
+    "Stuart must approve and merge before it takes effect.",
+    {"description": str},
 )
-async def edit_code_tool(args: dict[str, Any]) -> dict[str, Any]:
-    result = self_modify.propose_code_change(
-        args["file_path"],
-        args["content_hash"],
-        args["new_content"],
-        args["description"],
-    )
+async def propose_change_tool(args: dict[str, Any]) -> dict[str, Any]:
+    result = await self_modify.propose_change(args["description"])
     text = json.dumps(result)
     return {"content": [{"type": "text", "text": text}]}
 
@@ -310,8 +268,7 @@ ALL_TOOLS = [
     read_state_tool,
     write_state_tool,
     list_state_tool,
-    read_file_tool,
-    edit_code_tool,
+    propose_change_tool,
     schedule_job_tool,
     cancel_job_tool,
     list_jobs_tool,
