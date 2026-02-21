@@ -24,4 +24,7 @@ RUN mkdir -p state logs && \
 
 USER botuser
 
+# /repo is mounted at runtime as root-owned; mark it safe for botuser's git
+RUN git config --global --add safe.directory /repo
+
 CMD ["python", "main.py"]
