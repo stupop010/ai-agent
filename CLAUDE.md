@@ -52,3 +52,4 @@ Runs in Docker. See `bot/Dockerfile`. Requires `.env` with:
 - Imports are local modules (no package prefix) — bot runs from `bot/` as working dir
 - Keep system prompt lean — no bulk memory injection, agent reads state on demand
 - All code changes by the agent go through PR review (never auto-merge)
+- GH_TOKEN env var is available for git push operations — use it in remote URL
