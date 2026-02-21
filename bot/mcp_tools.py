@@ -14,7 +14,6 @@ import agent_jobs
 import bot_context
 import letta_agent
 import memory_tools
-import self_modify
 import state
 
 logger = logging.getLogger(__name__)
@@ -168,23 +167,6 @@ async def list_state_tool(args: dict[str, Any]) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
-# ── Self-modification tools ─────────────────────────────────────────
-
-
-@tool(
-    "propose_change",
-    "Propose a code change to the bot's own source code. "
-    "This spawns a Claude Code session that can read, search, and edit files, "
-    "then commits to a dev branch and creates a GitHub PR for human review. "
-    "Stuart must approve and merge before it takes effect.",
-    {"description": str},
-)
-async def propose_change_tool(args: dict[str, Any]) -> dict[str, Any]:
-    result = await self_modify.propose_change(args["description"])
-    text = json.dumps(result)
-    return {"content": [{"type": "text", "text": text}]}
-
-
 # ── Scheduling tools ─────────────────────────────────────────────────
 
 
@@ -268,7 +250,6 @@ ALL_TOOLS = [
     read_state_tool,
     write_state_tool,
     list_state_tool,
-    propose_change_tool,
     schedule_job_tool,
     cancel_job_tool,
     list_jobs_tool,

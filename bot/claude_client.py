@@ -15,6 +15,7 @@ from claude_agent_sdk import (
     TextBlock,
     ResultMessage,
 )
+from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
 import letta_agent
 import logs
@@ -27,6 +28,20 @@ _conversation_history: list[dict] = []
 MODEL = "claude-sonnet-4-6"
 MAX_TOOL_ITERATIONS = 15
 MAX_HISTORY = 20  # Keep last N messages (user + assistant pairs)
+
+# Paths that must never be written to, regardless of what the agent decides
+BLOCKED_PATHS = [".env", ".db", "credentials", "secrets", "__pycache__", ".git",
+                 "bot/state/", "bot/logs/"]
+
+
+async def _can_use_tool(tool_name, input_data, context):
+    """Hard safety guardrail blocking writes/edits to sensitive paths."""
+    if tool_name in ("Write", "Edit"):
+        file_path = (input_data.get("file_path") or "").lower()
+        for blocked in BLOCKED_PATHS:
+            if blocked in file_path:
+                return PermissionResultDeny(message=f"Blocked: {file_path}")
+    return PermissionResultAllow(updated_input=input_data)
 
 
 # ── System prompt ────────────────────────────────────────────────────
@@ -53,7 +68,9 @@ def _build_system_prompt() -> str:
         f"{persona}\n\n"
         f"# About Stuart\n{human}\n\n"
         f"{journal_section}"
-        f"{limitations}\n"
+        f"{limitations}\n\n"
+        "To modify your own code, use the self-modify Skill. "
+        "Never edit files on the main branch directly.\n"
     )
 
 
@@ -89,9 +106,18 @@ async def ask(message: str) -> str:
     options = ClaudeAgentOptions(
         system_prompt=system_prompt,
         model=MODEL,
+        cwd="/repo",
+        setting_sources=["project"],
         mcp_servers={"bot": mcp_server},
-        allowed_tools=ALLOWED_TOOL_NAMES + ["WebSearch"],
+        allowed_tools=ALLOWED_TOOL_NAMES + [
+            "WebSearch",
+            "Skill",
+            "Read", "Write", "Edit",
+            "Grep", "Glob",
+            "Bash",
+        ],
         permission_mode="bypassPermissions",
+        can_use_tool=_can_use_tool,
         max_turns=MAX_TOOL_ITERATIONS,
     )
 
