@@ -103,28 +103,31 @@ def get_current_branch() -> str:
 
 def ensure_dev_branch() -> bool:
     """
-    Ensure we're on the dev branch, creating it if needed.
+    Ensure we're on a fresh dev branch based on current main HEAD.
+
+    Always deletes any existing dev branch first so we start clean —
+    stale dev branches from previous PRs would otherwise cause conflicts.
 
     Returns:
         True if successful, False otherwise
     """
     try:
         current = get_current_branch()
-        if current == DEV_BRANCH:
-            return True
 
-        # Check if dev branch exists
+        # If we're on dev already, switch to main first so we can delete it
+        if current == DEV_BRANCH:
+            _run_git(["checkout", MAIN_BRANCH])
+
+        # Delete stale local dev branch if it exists
         result = _run_git(
             ["rev-parse", "--verify", DEV_BRANCH],
             check=False
         )
-
         if result.returncode == 0:
-            # Branch exists, check it out
-            _run_git(["checkout", DEV_BRANCH])
-        else:
-            # Create new branch from current HEAD
-            _run_git(["checkout", "-b", DEV_BRANCH])
+            _run_git(["branch", "-D", DEV_BRANCH])
+
+        # Create fresh dev branch from main HEAD
+        _run_git(["checkout", "-b", DEV_BRANCH])
 
         logger.info("Switched to dev branch")
         return True
