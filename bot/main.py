@@ -1,4 +1,4 @@
-# v1.0.3 - PR workflow test
+# v2.0.0 - Three-tier memory, no Letta
 import asyncio
 import logging
 import os
@@ -11,6 +11,7 @@ import agent_jobs
 import bot_context
 import db
 import logs
+import memory
 from scheduler import build_scheduler
 
 load_dotenv()
@@ -22,9 +23,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 COGS = [
-    "cogs.tasks",
-    "cogs.checkin",
-    "cogs.memory",
+    "cogs.conversation",
+    "cogs.commands",
 ]
 
 
@@ -60,6 +60,7 @@ class AccountabilityBot(commands.Bot):
 def main():
     db.init_db()
     logs.ensure_logs_dir()
+    memory._ensure_dirs()
     token = os.environ.get("DISCORD_TOKEN")
     if not token:
         raise RuntimeError("DISCORD_TOKEN not set in environment")

@@ -2,7 +2,7 @@
 Agent-created scheduled jobs.
 
 Handles job lifecycle: add, cancel, list, persist to JSON, reload on startup.
-Jobs fire by calling agent_interface.ask() and sending the reply to Discord.
+Jobs fire by calling agent.ask() and sending the reply to Discord.
 """
 import json
 import logging
@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
-import agent_interface
+import agent
 import bot_context
 import logs
 
@@ -163,7 +163,7 @@ async def _run_job(job_id: str, message: str) -> None:
     logs.write_event("decision", f"Agent job firing: {job_id}", {"message": message[:200]})
 
     try:
-        reply = await agent_interface.ask(
+        reply = await agent.ask(
             f"[Scheduled reminder] {message}",
             topics=["scheduled", "agent-job"],
         )

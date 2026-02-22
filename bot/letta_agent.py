@@ -52,8 +52,16 @@ LIMITATIONS = """# My Limitations & Memory System
 - Always check relevant state files at the start of a conversation to orient myself.
 
 ## Identity Memory (Letta)
-- Use `read_memory` / `update_memory` only for core identity blocks (persona, human).
-- Do NOT use Letta memory for working data — use state files instead.
+- Use `read_memory` / `update_memory` for highly observed, modifiable memory blocks (persona, human, patterns).
+- These are core identity blocks I actively monitor and refine over time.
+- Use `list_memories` to see all blocks, `create_memory` to add new ones.
+
+## Tasks
+- Use `list_tasks` / `add_task` / `complete_task` to manage Stuart's task list directly.
+
+## Journal
+- Use `search_journal` to search past interactions by topic or keyword.
+- Use `read_journal` to see recent journal entries.
 
 ## Scheduling
 - Use `schedule_job` to create one-shot reminders (with `run_at`) or recurring check-ins (with `hour`, `minute`, `day_of_week`).
@@ -82,7 +90,6 @@ def get_agent_id() -> str:
         return _agent_id
 
     # First run — create the persistent Stuart agent
-    # Note: check https://app.letta.com for available model names on your plan
     client = get_client()
     agent = client.agents.create(
         name="Stuart-Accountability-Bot",

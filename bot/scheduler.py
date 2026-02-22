@@ -7,7 +7,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 import pytz
 
 import db
-import agent_interface
+import agent
 import logs
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def build_scheduler(bot) -> AsyncIOScheduler:
         logs.write_event("decision", "Starting morning check-in job", {"job": "morning_checkin"})
         try:
             channel = await _get_channel()
-            checkin_cog = bot.cogs.get("Checkin")
+            checkin_cog = bot.cogs.get("Conversation")
             if checkin_cog:
                 await checkin_cog.send_morning_checkin(channel)
         except Exception as e:
@@ -44,7 +44,7 @@ def build_scheduler(bot) -> AsyncIOScheduler:
         logs.write_event("decision", "Starting EOD review job", {"job": "eod_review"})
         try:
             channel = await _get_channel()
-            checkin_cog = bot.cogs.get("Checkin")
+            checkin_cog = bot.cogs.get("Conversation")
             if checkin_cog:
                 await checkin_cog.send_eod_review(channel)
         except Exception as e:
@@ -59,7 +59,7 @@ def build_scheduler(bot) -> AsyncIOScheduler:
                 return
             channel = await _get_channel()
             for task in stale:
-                reply = await agent_interface.ask(
+                reply = await agent.ask(
                     f'Task #{task["id"]} has been open for over 24 hours: "{task["description"]}". '
                     "Send a short, direct nudge to Stuart — not more than one sentence. "
                     "Don't be preachy.",
@@ -91,7 +91,7 @@ def build_scheduler(bot) -> AsyncIOScheduler:
             ]
             completed_list = [t["description"] for t in completed_today]
 
-            reply = await agent_interface.perch_review(open_list, completed_list)
+            reply = await agent.perch_review(open_list, completed_list)
 
             # Only send if the agent has something to say
             if reply.strip().upper() != "OK" and reply.strip():

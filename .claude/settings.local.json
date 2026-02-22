@@ -14,7 +14,8 @@
       "Bash(python3 -c \"import ast; ast.parse\\(open\\(''C:/Users/stupo/OneDrive/ai-agent/bot/claude_client.py''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
       "Bash(git branch:*)",
       "WebFetch(domain:www.reddit.com)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:openclaw.ai)"
     ]
   }
 }

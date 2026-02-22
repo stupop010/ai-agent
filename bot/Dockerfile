@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p state logs && \
+RUN mkdir -p state/core state/index state/files logs && \
     # Create non-root user (Claude Code CLI refuses --dangerously-skip-permissions as root)
     useradd -m -s /bin/bash botuser && \
     chown -R botuser:botuser /app
