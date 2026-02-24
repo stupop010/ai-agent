@@ -116,20 +116,11 @@ def _build_system_prompt() -> str:
     if journal_section:
         parts.append(journal_section)
 
-    parts.append(
-        "For code changes, prefer using the run_claude_code tool — it gives you full "
-        "Claude Code capabilities (read, edit, search, git, PRs). The self-modify Skill "
-        "is available as a fallback. Never edit files on the main branch directly."
-    )
-
+    # Claude Code guidance is in state/core/claude-code.md (loaded automatically above)
+    # Just inject the Obsidian repo name if configured
     obsidian_repo = os.environ.get("OBSIDIAN_REPO")
     if obsidian_repo:
-        parts.append(
-            f"To read or update Obsidian notes, use run_claude_code with the Obsidian repo. "
-            f"Example: run_claude_code(prompt='Clone {obsidian_repo}, read <file>, "
-            f"update it with: <content>, commit and push', cwd='/tmp/obsidian'). "
-            f"The vault is a GitHub repo — clone it, make changes, push."
-        )
+        parts.append(f"Obsidian vault repo: {obsidian_repo}")
 
     return "\n\n".join(parts)
 
