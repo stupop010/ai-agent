@@ -48,17 +48,48 @@ Tools exposed via MCP server in `bot/tools/`:
 - `add_task`, `complete_task`, `list_tasks` — task CRUD
 - `search_journal`, `read_journal` — journal search
 - `schedule_job`, `cancel_job`, `list_jobs` — scheduling
+- `run_claude_code` — Claude Code CLI for code changes, git ops, Obsidian vault
 - Plus SDK built-in: WebSearch, Read, Write, Edit, Grep, Glob, Bash, Skill
 
 ## Running
 
-Runs in Docker. See `bot/Dockerfile`. Requires `.env` with:
+Runs in Docker on `root@46.225.190.185` at `/opt/ai-agent`. Requires `.env` (`/opt/ai-agent/bot/.env`) with:
 - `DISCORD_TOKEN`
 - `ANTHROPIC_API_KEY`
-- `LETTA_BASE_URL` (defaults to `http://localhost:8283`)
-- `LETTA_AGENT_ID` (set after first run to reuse agent)
 - `CHANNEL_ID`
-- `GITHUB_TOKEN` (for self-modify PRs)
+- `GITHUB_TOKEN` (for self-modify PRs and Obsidian vault access)
+- `OBSIDIAN_REPO` (GitHub repo path, e.g. `stupop010/obsidian-vault`)
+
+### Rebuild & deploy
+
+```bash
+ssh root@46.225.190.185
+cd /opt/ai-agent
+git pull origin main
+docker stop letta-bot-1 && docker rm letta-bot-1
+docker build -t letta-bot -f bot/Dockerfile bot/
+docker run -d --name letta-bot-1 --restart unless-stopped \
+  --env-file /opt/ai-agent/bot/.env \
+  -v /opt/ai-agent:/repo \
+  -v /opt/ai-agent/claude-config/claude-home:/home/botuser/.claude \
+  -v /opt/ai-agent/claude-config/managed/managed-settings.json:/etc/claude-code/managed-settings.json:ro \
+  letta-bot
+```
+
+### Claude Code CLI (in-container)
+
+The bot has a `run_claude_code` tool that shells out to `claude -p`. It uses Stuart's OAuth subscription (not the API key) to avoid API charges.
+
+- **OAuth token expires ~weekly.** Stuart must SSH in and re-auth:
+  ```bash
+  ssh -t root@46.225.190.185
+  docker exec -it letta-bot-1 bash
+  claude auth login
+  ```
+- Credentials persist at `/opt/ai-agent/claude-config/claude-home/.credentials.json` (volume-mounted into the container at `/home/botuser/.claude/`)
+- `/opt/ai-agent/claude-config/managed/managed-settings.json` must exist (empty `{}` is fine) — mounted read-only to `/etc/claude-code/managed-settings.json`
+- The `.claude` home dir needs subdirs owned by UID 1000 (botuser): `backups cache debug plugins projects session-env shell-snapshots todos`
+- `ANTHROPIC_API_KEY` is stripped from the Claude Code subprocess env in `claude_code_tools.py` so it uses OAuth instead
 
 ## Conventions
 - Python 3.11+, no type stubs needed
