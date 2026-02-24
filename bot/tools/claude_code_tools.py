@@ -47,6 +47,8 @@ async def run_claude_code(args: dict[str, Any]) -> dict[str, Any]:
     ]
 
     env = os.environ.copy()
+    # Remove API key so Claude Code uses OAuth subscription instead
+    env.pop("ANTHROPIC_API_KEY", None)
     # Ensure git is configured for commits
     env.setdefault("GIT_AUTHOR_NAME", "Stuart Bot")
     env.setdefault("GIT_COMMITTER_NAME", "Stuart Bot")
