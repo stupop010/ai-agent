@@ -8,8 +8,9 @@ from tools.state_tools import ALL_TOOLS as STATE_TOOLS
 from tools.schedule_tools import ALL_TOOLS as SCHEDULE_TOOLS
 from tools.task_tools import ALL_TOOLS as TASK_TOOLS
 from tools.journal_tools import ALL_TOOLS as JOURNAL_TOOLS
+from tools.claude_code_tools import ALL_TOOLS as CLAUDE_CODE_TOOLS
 
-ALL_TOOLS = MEMORY_TOOLS + STATE_TOOLS + SCHEDULE_TOOLS + TASK_TOOLS + JOURNAL_TOOLS
+ALL_TOOLS = MEMORY_TOOLS + STATE_TOOLS + SCHEDULE_TOOLS + TASK_TOOLS + JOURNAL_TOOLS + CLAUDE_CODE_TOOLS
 
 mcp_server = create_sdk_mcp_server("bot", tools=ALL_TOOLS)
 

@@ -78,10 +78,17 @@ def build_scheduler(bot) -> AsyncIOScheduler:
 
     async def perch():
         """Autonomous review cycle — fires mid-morning and afternoon on weekdays.
-        Reads current state + tasks and speaks up only if something is worth flagging."""
+        Strix-style: agent reads backlog, picks work, updates state, only messages when there's signal."""
         logger.info("Running perch review")
         logs.write_event("decision", "Starting perch review", {"job": "perch"})
         try:
+            # Fetch last perch journal entry for continuity
+            last_perch_summary = None
+            perch_entries = logs.query_journal_by_topic("perch")
+            if perch_entries:
+                last = perch_entries[-1]
+                last_perch_summary = f"[{last['t'][:16]}] {last['summary']}"
+
             open_tasks = db.list_open_tasks()
             completed_today = db.list_todays_completed()
 
@@ -91,7 +98,9 @@ def build_scheduler(bot) -> AsyncIOScheduler:
             ]
             completed_list = [t["description"] for t in completed_today]
 
-            reply = await agent.perch_review(open_list, completed_list)
+            reply = await agent.perch_review(
+                open_list, completed_list, last_perch_summary=last_perch_summary
+            )
 
             # Only send if the agent has something to say
             if reply.strip().upper() != "OK" and reply.strip():

@@ -6,6 +6,7 @@ alive as a module-level singleton so conversation history persists
 across calls within the same process lifetime.
 """
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -116,9 +117,19 @@ def _build_system_prompt() -> str:
         parts.append(journal_section)
 
     parts.append(
-        "To modify your own code, use the self-modify Skill. "
-        "Never edit files on the main branch directly."
+        "For code changes, prefer using the run_claude_code tool — it gives you full "
+        "Claude Code capabilities (read, edit, search, git, PRs). The self-modify Skill "
+        "is available as a fallback. Never edit files on the main branch directly."
     )
+
+    obsidian_repo = os.environ.get("OBSIDIAN_REPO")
+    if obsidian_repo:
+        parts.append(
+            f"To read or update Obsidian notes, use run_claude_code with the Obsidian repo. "
+            f"Example: run_claude_code(prompt='Clone {obsidian_repo}, read <file>, "
+            f"update it with: <content>, commit and push', cwd='/tmp/obsidian'). "
+            f"The vault is a GitHub repo — clone it, make changes, push."
+        )
 
     return "\n\n".join(parts)
 
@@ -296,21 +307,40 @@ async def focus_request(open_tasks: list[str]) -> str:
     )
 
 
-async def perch_review(open_tasks: list[str], completed_today: list[str]) -> str:
-    """Autonomous review during perch time."""
+async def perch_review(
+    open_tasks: list[str],
+    completed_today: list[str],
+    last_perch_summary: str | None = None,
+) -> str:
+    """Autonomous review during perch time — Strix-style self-directed work."""
     open_formatted = "\n".join(f"- {t}" for t in open_tasks) if open_tasks else "(none)"
     done_formatted = "\n".join(f"- {t}" for t in completed_today) if completed_today else "(none)"
 
-    return await ask(
-        f"""Perch review time. Check in on Stuart's progress.
+    continuity = ""
+    if last_perch_summary:
+        continuity = f"\n## Last perch\n{last_perch_summary}\n"
 
+    return await ask(
+        f"""It's perch time — your autonomous review cycle.
+
+## Quick context
 Open tasks:
 {open_formatted}
 
 Completed today:
 {done_formatted}
+{continuity}
+## Instructions
+1. Read your backlog: use `read_state` to open `perch-backlog.md`
+2. Pick ONE item from the backlog to work on this tick
+3. Do the work — use your tools (read_state, write_state, search_journal, list_tasks, update_memory)
+4. If you update any state files (patterns, commitments, today, inbox), do it now
+5. You can also update the backlog itself if items are stale or you want to add new ones
 
-If you notice anything concerning (procrastination, stalled tasks, focus issues), say something. Otherwise, you can stay quiet.""",
+## Output
+- Respond "OK" if there's nothing worth messaging Stuart about
+- Only speak up if there's genuine signal: overdue commitment, stuck task, pattern worth surfacing, inbox item needing attention
+- Whatever you do, the journal will capture it for continuity""",
         topics=["perch", "review", "autonomous"],
     )
 

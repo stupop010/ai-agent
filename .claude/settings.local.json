@@ -15,7 +15,9 @@
       "Bash(git branch:*)",
       "WebFetch(domain:www.reddit.com)",
       "WebSearch",
-      "WebFetch(domain:openclaw.ai)"
+      "WebFetch(domain:openclaw.ai)",
+      "WebFetch(domain:markaicode.com)",
+      "WebFetch(domain:x.com)"
     ]
   }
 }

@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-cer
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Claude Code CLI for run_claude_code tool
+RUN npm install -g @anthropic-ai/claude-code
+
 COPY . .
 
 RUN mkdir -p state/core state/index state/files logs && \
